@@ -21,7 +21,7 @@ import urllib.parse
 from datetime import datetime
 
 from aiohttp import web
-from telethon import TelegramClient, events, Button, types
+from telethon import TelegramClient, events, Button
 
 # ----------------------------- Конфигурация -----------------------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -36,21 +36,20 @@ SESSION_PATH = f"{DATA_DIR}/test_bot_session"
 DOMAIN = "bot-1791103083-5513-tpaba69.bothost.tech"
 WEBAPP_URL = f"https://{DOMAIN}/coinflip"
 
-START_BALANCE = 10000      # тестовый стартовый баланс
-WIN_MULTIPLIER_NUM = 19    # коэффициент 1.9 = 19/10 (целочисленно, округление вниз)
+START_BALANCE = 10000
+WIN_MULTIPLIER_NUM = 19
 WIN_MULTIPLIER_DEN = 10
-INIT_DATA_MAX_AGE = 24 * 3600  # init_data старше суток считаем протухшим
+INIT_DATA_MAX_AGE = 24 * 3600
 
 # Глобальные объекты
 bot = None
 data = {"users": {}}
 data_lock = asyncio.Lock()
-rng = random.SystemRandom()  # криптостойкий рандом, решает только сервер
+rng = random.SystemRandom()
 
 
 # ----------------------------- Утилиты -----------------------------
 def log_error(where, exc):
-    """Пишем ошибку в файл логов и в stdout."""
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -63,7 +62,6 @@ def log_error(where, exc):
 
 
 def load_data():
-    """Загружаем JSON с балансами; создаём файл, если его нет."""
     os.makedirs(DATA_DIR, exist_ok=True)
     if not os.path.exists(DATA_FILE):
         save_data({"users": {}})
@@ -79,7 +77,6 @@ def load_data():
 
 
 def save_data(d):
-    """Атомарное сохранение: временный файл + os.replace()."""
     os.makedirs(DATA_DIR, exist_ok=True)
     tmp = f"{DATA_FILE}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -90,10 +87,6 @@ def save_data(d):
 
 
 def verify_init_data(init_data):
-    """
-    Проверка подписи Telegram WebApp.
-    Возвращает dict пользователя (из поля user) или None, если подпись невалидна.
-    """
     try:
         if not init_data or not BOT_TOKEN:
             return None
@@ -101,19 +94,14 @@ def verify_init_data(init_data):
         received_hash = pairs.pop("hash", None)
         if not received_hash:
             return None
-
-        # Строка проверки: key=value через \n, ключи по алфавиту
         check_string = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs.keys()))
         secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
         calc_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(calc_hash, received_hash):
             return None
-
-        # Проверка свежести
         auth_date = int(pairs.get("auth_date", "0") or 0)
         if auth_date and time.time() - auth_date > INIT_DATA_MAX_AGE:
             return None
-
         user = json.loads(pairs.get("user", "{}"))
         if not isinstance(user, dict) or "id" not in user:
             return None
@@ -124,7 +112,6 @@ def verify_init_data(init_data):
 
 
 def get_user_balance(uid):
-    """Баланс юзера; при первом обращении создаём запись со стартовым балансом."""
     key = str(uid)
     if key not in data["users"]:
         data["users"][key] = {"balance": START_BALANCE}
@@ -133,7 +120,6 @@ def get_user_balance(uid):
 
 
 def set_user_balance(uid, value):
-    """Устанавливаем баланс и сохраняем файл (вызывать под data_lock)."""
     data["users"][str(uid)] = {"balance": int(value)}
     save_data(data)
 
@@ -145,7 +131,6 @@ def json_error(message, status=500, **extra):
 
 
 async def extract_init_data(request):
-    """init_data берём из query, заголовка или JSON-тела."""
     init_data = request.query.get("init_data") or request.headers.get("X-Init-Data")
     body = None
     if not init_data and request.can_read_body:
@@ -205,7 +190,6 @@ async def handle_play(request):
             return json_error("Invalid signature", 403)
         uid = user["id"]
 
-        # Валидация ставки и выбора
         choice = body.get("choice")
         if choice not in ("heads", "tails"):
             return json_error("Bad choice", 400)
@@ -218,17 +202,15 @@ async def handle_play(request):
 
         tx_id = f"coin:{uid}:{uuid.uuid4().hex}"
 
-        # Всё изменение баланса — атомарно под локом
         async with data_lock:
             balance = get_user_balance(uid)
             if balance < bet:
                 return json_error("insufficient_balance", 400, balance=balance)
-
-            balance -= bet                                  # списываем ставку
-            result = "heads" if rng.randrange(2) == 0 else "tails"  # 50/50 на сервере
+            balance -= bet
+            result = "heads" if rng.randrange(2) == 0 else "tails"
             won = (result == choice)
             payout = (bet * WIN_MULTIPLIER_NUM // WIN_MULTIPLIER_DEN) if won else 0
-            balance += payout                               # начисляем выигрыш
+            balance += payout
             set_user_balance(uid, balance)
 
         print(f"[play] {tx_id} bet={bet} choice={choice} result={result} won={won}", flush=True)
@@ -247,6 +229,8 @@ async def handle_play(request):
 # ----------------------------- Бот (Telethon) -----------------------------
 def webapp_buttons():
     text = "🪙 Открыть Coin Flip"
+    if hasattr(Button, "web_view"):
+        return [[Button.web_view(text, WEBAPP_URL)]]
     return [[Button.url(text, WEBAPP_URL)]]
 
 
@@ -276,6 +260,20 @@ async def start_bot():
         except Exception as e:
             log_error("on_coinflip", e)
 
+    @bot.on(events.NewMessage(pattern=r"^/diag(?:\s|$)"))
+    async def on_diag(event):
+        try:
+            import telethon
+            has_wv = hasattr(Button, "web_view")
+            has_kb = hasattr(__import__("telethon.types", fromlist=["x"]), "KeyboardButtonWebView")
+            await event.respond(
+                f"telethon: {telethon.__version__}\n"
+                f"Button.web_view: {has_wv}\n"
+                f"KeyboardButtonWebView: {has_kb}"
+            )
+        except Exception as e:
+            log_error("on_diag", e)
+
     me = await bot.get_me()
     print(f"[bot] запущен как @{me.username}", flush=True)
 
@@ -300,7 +298,6 @@ async def start_web():
 async def main():
     global data
     data = load_data()
-    # Сначала веб-сервер: /ping работает, даже если бот не стартовал
     await start_web()
     try:
         await start_bot()
@@ -417,7 +414,6 @@ COINFLIP_HTML = r"""<!DOCTYPE html>
   var coin = el("coin"), flash = el("flash"), resultText = el("resultText");
   var errorEl = el("error"), flipBtn = el("flipBtn"), customInput = el("customInput");
 
-  // Имя юзера из Telegram
   if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
     var u = tg.initDataUnsafe.user;
     el("userName").textContent = u.first_name || u.username || "Игрок";
@@ -436,7 +432,6 @@ COINFLIP_HTML = r"""<!DOCTYPE html>
     } catch (e) { showError("Нет связи с сервером"); }
   }
 
-  // Выбор стороны
   document.querySelectorAll("[data-choice]").forEach(function (b) {
     b.addEventListener("click", function () {
       if (state.busy) return;
@@ -445,7 +440,6 @@ COINFLIP_HTML = r"""<!DOCTYPE html>
     });
   });
 
-  // Выбор ставки
   document.querySelectorAll("[data-bet]").forEach(function (b) {
     b.addEventListener("click", function () {
       if (state.busy) return;
@@ -485,7 +479,7 @@ COINFLIP_HTML = r"""<!DOCTYPE html>
     resultText.className = "result-text";
     coin.textContent = "🪙";
     coin.classList.remove("spin");
-    void coin.offsetWidth;            // перезапуск анимации
+    void coin.offsetWidth;
     coin.classList.add("spin");
 
     var started = Date.now();
@@ -502,7 +496,6 @@ COINFLIP_HTML = r"""<!DOCTYPE html>
       data = { error: "network" };
     }
 
-    // Дожидаемся окончания анимации (1.5 сек)
     var left = 1500 - (Date.now() - started);
     if (left > 0) await sleep(left);
     coin.classList.remove("spin");
