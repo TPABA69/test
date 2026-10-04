@@ -1,2 +1,2 @@
-telethon
-aiohttp
+telethon>=1.30,<2
+aiohttp>=3.9,<4
