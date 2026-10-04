@@ -246,7 +246,6 @@ async def handle_play(request):
 
 # ----------------------------- Бот (Telethon) -----------------------------
 def webapp_buttons():
-def webapp_buttons():
     text = "🪙 Открыть Coin Flip"
     return [[Button.url(text, WEBAPP_URL)]]
 
