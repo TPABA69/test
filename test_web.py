@@ -246,13 +246,9 @@ async def handle_play(request):
 
 # ----------------------------- Бот (Telethon) -----------------------------
 def webapp_buttons():
-    """Inline-кнопка, открывающая WebApp. Если в версии Telethon нет Button.web_view — собираем вручную."""
+def webapp_buttons():
     text = "🪙 Открыть Coin Flip"
-    if hasattr(Button, "web_view"):
-        return [[Button.web_view(text, WEBAPP_URL)]]
-    return types.ReplyInlineMarkup(rows=[
-        types.KeyboardButtonRow(buttons=[types.KeyboardButtonWebView(text=text, url=WEBAPP_URL)])
-    ])
+    return [[Button.url(text, WEBAPP_URL)]]
 
 
 async def start_bot():
